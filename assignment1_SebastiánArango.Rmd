@@ -1,0 +1,117 @@
+---
+title: "Assignment 1"
+author: "Sebastián Arango Trujillo"
+date: "2024-12-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(httr2)
+library(dplyr)
+library(sf)
+library(ggplot2)
+library(ggspatial)
+
+# Read the shapefile and save de coordinates 
+austria_DC <- sf::st_read("C:/Sebastian/Especializacion GIS/ME Automated Data Processing with R/Tarea 1/DataAssignment1/DataAssignment1/Austria_Districts_Centroids.shp") 
+crs <- sf::st_crs(austria_DC)
+coordinates <- sf::st_coordinates(austria_DC)
+
+# Create a function to retrieve temperature from the Geosphere Austria API  
+set_temperatures <- function(lat, long) {
+  #Parameters for the request
+  base <- "https://dataset.api.hub.geosphere.at/v1/timeseries/historical/inca-v1-1h-1km"
+  parameters <- "T2M"  
+  start_date <- "2023-06-01T22:00"
+  end_date <- "2023-06-01T22:00"
+  latitude <- toString(lat)
+  longitude <- toString(long)
+  latlon <- paste0(latitude, ",", longitude)
+  output_format <- "geojson"
+
+  #Join the parameters for the full url
+  full_url <- sprintf("%s?parameters=%s&start=%s&end=%s&lat_lon=%s&output_format=%s", 
+                      base, parameters, start_date, end_date, latlon, output_format)
+
+  #Request
+  req <- httr2::request(full_url)
+  resp <- httr2::req_perform(req)
+  
+  # Check if the status code of the response is not 200 
+  if (httr2::resp_status(resp) != 200) {
+    stop("Error: Failed to retrieve data, status code is not 200")
+  }
+  
+  # Create geojson 
+  response_content <- httr2::resp_body_json(resp)
+
+  # Load the value of the temperature and return it
+  temperature <- response_content$features[[1]]$properties$parameters$T2M$data[[1]]
+  return(temperature)
+}
+
+# Empty data frame to save the results
+temperature_data <- data.frame(lat = numeric(0), lon = numeric(0), temperature = numeric(0))
+
+# Loop to save the coordinates and to call the API function 
+for (r in 1:nrow(coordinates)) { 
+  lat <- coordinates[r, 2]  
+  lon <- coordinates[r, 1]  
+  
+  temp <- set_temperatures(lat, lon)
+  
+  
+  temperature_data <- rbind(temperature_data, data.frame(lat = lat, lon = lon, temperature = temp))
+  
+  # Pause the loop to avoid exceeding the API limit
+  Sys.sleep(2)
+}
+
+# Create the object with the temperature data
+temperature_sf <- st_as_sf(temperature_data, 
+                           coords = c("lon", "lat"), 
+                           crs = 4326)  
+
+
+# Load the Austrian political districts shapefile
+austria_districts <- st_read("C:/Sebastian/Especializacion GIS/ME Automated Data Processing with R/Tarea 1/DataAssignment1/DataAssignment1/Austria_Districts.shp")
+
+# Join the spatial objects
+temperature_districts <- st_join(austria_districts, temperature_sf)
+
+# Plot the choropleth map with generated data
+ggplot(data = temperature_districts) +
+  geom_sf(aes(fill = temperature), color = "white", size = 0.2) +  
+  scale_fill_gradientn(
+    colors = c("blue", "lightblue", "white", "orange", "red"),
+    name = "Temperature (°C)"
+  ) +
+  labs(
+    title = "Temperature Distribution in Austria (June 1, 2023)", 
+    subtitle = "Temperatures sampled at district centroid positions",
+    caption = "Data retrieved from Geosphere API"
+  ) +
+
+  annotation_north_arrow(location = "tl", which_north = "true", width = unit(2, "cm")) +
+  annotation_scale(location = "bl", width_hint = 0.2)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
